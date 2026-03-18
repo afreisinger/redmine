@@ -1,0 +1,144 @@
+---
+# Redmine Docker Stack - Orquestación de Servicios
+# Documentación: ver README.md y docs/GITHUB_ACTIONS.md
+# 
+# Requisitos:
+# - Docker 20.10+
+# - Docker Compose 1.29+
+# - Red "proxy" (crear con: docker network create proxy)
+#
+# Uso:
+#   docker compose up -d          # Levantar
+#   docker compose logs -f        # Ver logs
+#   docker compose down           # Bajar
+#   docker compose down -v        # Bajar + eliminar volúmenes
+
+volumes:
+  redmine_storage:      # PostgreSQL data (persistente)
+  redmine_files:        # Archivos subidos por usuarios
+  redmine_plugins:      # Plugins activos
+  redmine_themes:       # Temas instalados
+  redmine_logs:         # Logs de Redmine
+  redmine_initdb:       # Scripts de inicialización BD
+
+networks:
+  redmine_internal:     # Red interna para servicios
+    name: redmine_internal
+    driver: bridge
+  proxy:                # Red compartida con otros servicios
+    name: proxy
+    external: true      # Debe existir: docker network create proxy
+
+services:
+  # ============================================
+  # IMAGEN PERSONALIZADA: Temas de Redmine
+  # ============================================
+  redmine-themes:
+    build:
+      context: ./redmine-themes
+      dockerfile: Dockerfile
+      args:
+        THEMES_VERSION: ${THEMES_VERSION:-1.0.0}
+    image: redmine-themes:${THEMES_VERSION:-1.0.0}
+    volumes:
+      - redmine_themes:/usr/src/redmine/themes
+    # Sin healthcheck ni restart (es un builder)
+
+  # ============================================
+  # IMAGEN PERSONALIZADA: Plugins de Redmine
+  # ============================================
+  redmine-plugins:
+    build:
+      context: ./redmine-plugins
+      dockerfile: Dockerfile
+      args:
+        PLUGINS_VERSION: ${PLUGINS_VERSION:-1.0.0}
+    image: redmine-plugins:${PLUGINS_VERSION:-1.0.0}
+    volumes:
+      - redmine_plugins:/usr/src/redmine/plugins
+      - redmine_initdb:/docker-entrypoint-initdb.d
+    # Sin healthcheck ni restart (es un builder)
+
+  # ============================================
+  # BASE DE DATOS: PostgreSQL 16
+  # ============================================
+  db:
+    # Alternativa: mariadb:12.2.2 (descomenta línea abajo)
+    # image: mariadb:12.2.2
+    image: postgres:16
+    
+    container_name: redmine-db
+    restart: unless-stopped
+    depends_on:
+      - redmine-plugins    # Esperar scripts de init
+    environment:
+      POSTGRES_DB: ${DB_NAME:-redmine}
+      POSTGRES_USER: ${DB_USER:-redmine}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    # Parámetros para MariaDB (descomentar si usas MariaDB)
+    # command: >
+    #   --character-set-server=utf8mb4
+    #   --collation-server=utf8mb4_unicode_ci
+    #   --innodb-buffer-pool-size=256M
+    #   --max-connections=100
+    #   --slow-query-log=1
+    #   --long-query-time=2
+    volumes:
+      - redmine_storage:/var/lib/postgresql/data
+      # - redmine_storage:/var/lib/mysql            # Usar si es MariaDB
+      - redmine_initdb:/docker-entrypoint-initdb.d  # Scripts init
+      - ./db-backup:/backup                         # Para backups
+    healthcheck:
+      # Para MariaDB: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      test: ["CMD", "pg_isready", "-U", "${DB_USER:-redmine}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s        # Esperar 30s antes de primer check
+    networks:
+      - redmine_internal
+
+  # ============================================
+  # APLICACIÓN: Redmine 6.1.2
+  # ============================================
+  redmine:
+    image: redmine:6.1.2
+    container_name: redmine
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy              # Esperar que DB esté lista
+      redmine-themes:
+        condition: service_completed_successfully
+      redmine-plugins:
+        condition: service_completed_successfully
+    ports:
+      - "3000:3000"
+    environment:
+      # Configuración de Base de Datos
+      REDMINE_DB_POSTGRES: db
+      # REDMINE_DB_MYSQL: db                   # Usar si es MariaDB
+      REDMINE_DB_DATABASE: ${DB_NAME:-redmine}
+      REDMINE_DB_USERNAME: ${DB_USER:-redmine}
+      REDMINE_DB_PASSWORD: ${DB_PASSWORD}
+      
+      # Seguridad
+      REDMINE_SECRET_KEY_BASE: ${REDMINE_SECRET_KEY_BASE}
+      RAILS_ENV: production
+      
+      # Plugins
+      REDMINE_PLUGINS_MIGRATE: "yes"            # Auto-migrar plugins
+    volumes:
+      - redmine_files:/usr/src/redmine/files      # Archivos subidos
+      - redmine_plugins:/usr/src/redmine/plugins  # Plugins personalizados
+      - redmine_themes:/usr/src/redmine/themes    # Temas personalizados
+      - redmine_logs:/usr/src/redmine/log         # Logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 60s        # Esperar 60s antes de verificar (startup lento)
+    networks:
+      - redmine_internal
+      - proxy                  # Para acceso externo/reverse proxy
