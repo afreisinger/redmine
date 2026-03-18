@@ -171,6 +171,10 @@ jobs:
           echo "DB_PASSWORD=testpassword123" >> .env
           echo "REDMINE_SECRET_KEY_BASE=$(openssl rand -hex 64)" >> .env
 
+      - name: Create proxy network
+        run: |
+          docker network create proxy || true
+
       - name: Start services with docker compose
         run: |
           docker compose -f docker-compose.yml up -d
