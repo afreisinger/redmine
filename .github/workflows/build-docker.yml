@@ -121,6 +121,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build-plugins, build-themes]
     if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      security-events: write
     
     steps:
       - name: Run Trivy vulnerability scanner (plugins)
@@ -138,14 +141,14 @@ jobs:
           output: 'trivy-themes.sarif'
 
       - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: 'trivy-plugins.sarif'
           category: 'trivy-plugins'
 
       - name: Upload Trivy results (themes) to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: 'trivy-themes.sarif'
