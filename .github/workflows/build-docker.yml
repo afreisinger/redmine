@@ -138,10 +138,18 @@ jobs:
           output: 'trivy-themes.sarif'
 
       - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
-          sarif_file: 'trivy-*.sarif'
+          sarif_file: 'trivy-plugins.sarif'
+          category: 'trivy-plugins'
+
+      - name: Upload Trivy results (themes) to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-themes.sarif'
+          category: 'trivy-themes'
 
   test-compose:
     runs-on: ubuntu-latest
