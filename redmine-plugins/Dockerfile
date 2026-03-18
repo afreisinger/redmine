@@ -42,6 +42,16 @@ RUN mkdir -p ${REDMINE_PLUGINS} ${INITDB}
 COPY --from=builder /build/plugins/ ${REDMINE_PLUGINS}/
 COPY initdb/ ${INITDB}/
 
+# Fix security vulnerability in CodeMirror (CVE-2020-7760)
+RUN apk add --no-cache nodejs npm && \
+    if [ -d "${REDMINE_PLUGINS}/redmineup_cms/assets/codemirror/node_modules/codemirror" ]; then \
+        rm -rf "${REDMINE_PLUGINS}/redmineup_cms/assets/codemirror/node_modules/codemirror" && \
+        cd "${REDMINE_PLUGINS}/redmineup_cms/assets/codemirror" && \
+        npm install codemirror@5.65.2 --save 2>/dev/null || true && \
+        npm cache clean --force || true; \
+        apk del nodejs npm; \
+    fi
+
 RUN set -eux; \
     chown -R 999:999 ${REDMINE_PLUGINS}; \
     find ${REDMINE_PLUGINS} -type d -exec chmod 755 {} \; ; \
